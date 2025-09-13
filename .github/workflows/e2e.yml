@@ -1,0 +1,160 @@
+name: E2E Tests
+
+on:
+  push:
+  branches: [ main ]
+  paths-ignore:
+    - "**/README.md"
+pull_request:
+  paths-ignore:
+    - "**/README.md"
+
+permissions:
+contents: read
+
+env:
+KUBECONFIG: /tmp/kube-config-e2e-testing
+
+jobs:
+build-app:
+  runs-on: ubuntu-24.04
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache-dependency-path: "**/*.sum"
+
+    - name: Build Docker image
+      run: |
+        docker build -t go-e2e-app:latest .
+
+    - name: Export image to tar
+      run: |
+        docker save go-e2e-app:latest > /tmp/go-e2e-app.tar
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: go-e2e-app
+        path: /tmp/go-e2e-app.tar
+
+build-test:
+  runs-on: ubuntu-24.04
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache-dependency-path: "**/*.sum"
+
+    - name: Build E2E test image
+      run: |
+        docker build -f test/e2e/Dockerfile -t go-e2e-test:latest .
+
+    - name: Export test image to tar
+      run: |
+        docker save go-e2e-test:latest > /tmp/go-e2e-test.tar
+
+    - name: Upload test artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: go-e2e-test
+        path: /tmp/go-e2e-test.tar
+
+e2e-test:
+  runs-on: ubuntu-24.04
+  needs: [build-app, build-test]
+  strategy:
+    fail-fast: false
+    matrix:
+      k8s-version:
+        - "v1.30.0"
+        - "v1.29.0"
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Create KinD cluster
+      uses: helm/kind-action@v1.12.0
+      with:
+        node_image: kindest/node:${{ matrix.k8s-version }}
+        kubectl_version: ${{ matrix.k8s-version }}
+        cluster_name: e2e-test
+        config: ./.github/workflows/configs/kind-config.yaml
+
+      # Add step to patch kube-proxy
+      - name: Patch kube-proxy for higher file limits
+      run: |
+          kubectl -n kube-system patch daemonset kube-proxy --patch-file k8s/kube-proxy-patch.yaml
+          kubectl -n kube-system rollout restart daemonset/kube-proxy
+          kubectl -n kube-system rollout status daemonset/kube-proxy --timeout=120s
+          sleep 10
+
+      - name: Download app artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: go-e2e-app
+          path: /tmp
+
+      - name: Download test artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: go-e2e-test
+          path: /tmp
+
+      - name: Load Docker images
+      run: |
+          docker load --input /tmp/go-e2e-app.tar
+          docker load --input /tmp/go-e2e-test.tar
+
+      - name: Load images to KinD
+      run: |
+          kind load docker-image go-e2e-app:latest --name e2e-test
+          kind load docker-image go-e2e-test:latest --name e2e-test
+
+      - name: Deploy application
+      run: |
+          kubectl apply -f k8s/
+          kubectl wait --for=condition=available --timeout=300s deployment/go-e2e-app
+
+      - name: Verify deployment
+      run: |
+          kubectl get pods -l app=go-e2e-app
+          kubectl get svc go-e2e-app-service
+      - name: Run E2E tests
+      run: |
+          kubectl run e2e-test \
+            --image=go-e2e-test:latest \
+            --image-pull-policy=Never \
+            --restart=Never \
+            --rm -i \
+            --timeout=300s
+
+      - name: Cleanup
+  if: always()
+      run: |
+          kubectl delete -f k8s/ --ignore-not-found=true
+
+  e2e-summary:
+    if: always()
+    runs-on: ubuntu-24.04
+    needs: [e2e-test]
+    steps:
+      - name: Print result
+        run: echo ${{ needs.e2e-test.result }}
+      - name: Interpret result
+        run: |
+          if [[ success == ${{ needs.e2e-test.result }} ]]
+          then
+            echo "✅ All E2E tests passed!"
+          else
+            echo "❌ One or more E2E tests failed."
+            false
+          fi

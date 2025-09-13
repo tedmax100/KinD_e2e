@@ -1,0 +1,56 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: e2e-test-sa
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: e2e-test-role
+rules:
+# 基本資源權限
+- apiGroups: [""]
+  resources: ["services", "pods", "endpoints", "configmaps", "secrets", "nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch"]
+# 網路相關權限 (修復 kube-proxy 問題)
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies", "ingresses"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["services/proxy", "pods/proxy"]
+  verbs: ["get", "list", "watch"]
+# API 發現權限
+- apiGroups: [""]
+  resources: [""]
+  verbs: ["get"]
+- nonResourceURLs: ["/api", "/api/*", "/apis", "/apis/*", "/version", "/healthz", "/metrics"]
+  verbs: ["get"]
+# 事件權限
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["get", "list", "watch"]
+# 擴展 API 權限
+- apiGroups: ["extensions"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: e2e-test-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: e2e-test-role
+subjects:
+- kind: ServiceAccount
+  name: e2e-test-sa
+  namespace: default

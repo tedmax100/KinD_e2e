@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  # 應用配置
+  APP_ENV: "development"
+  LOG_LEVEL: "debug"
+  PORT: "8080"
+  
+  # Kubernetes 配置
+  KUBERNETES_NAMESPACE: "default"
+  KUBERNETES_SERVICE_HOST: "kubernetes.default.svc.cluster.local"
+  KUBERNETES_SERVICE_PORT: "443"
+  
+  # 健康檢查配置
+  HEALTH_CHECK_INTERVAL: "30s"
+  HEALTH_CHECK_TIMEOUT: "5s"
+  
+  # 測試配置
+  E2E_TEST_TIMEOUT: "300s"
+  E2E_TEST_PARALLEL: "2"
+  
+  # 網路配置
+  HTTP_TIMEOUT: "30s"
+  HTTP_RETRY_COUNT: "3"
+  
+  # 監控配置
+  METRICS_ENABLED: "true"
+  METRICS_PORT: "9090"

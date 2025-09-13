@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-e2e-app
+  labels:
+    app: go-e2e-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: go-e2e-app
+  template:
+    metadata:
+      labels:
+        app: go-e2e-app
+    spec:
+      serviceAccountName: e2e-test-sa  # 添加 ServiceAccount
+      containers:
+      - name: go-e2e-app
+        image: go-e2e-app:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8080
+        # 添加環境變數配置
+        envFrom:
+        - configMapRef:
+            name: app-config
+        env:
+        - name: KUBERNETES_SERVICE_HOST
+          value: "kubernetes.default.svc.cluster.local"
+        - name: KUBERNETES_SERVICE_PORT
+          value: "443"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15  # 增加延遲時間
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10  # 增加延遲時間
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          limits:
+            memory: "512Mi"  # 增加記憶體限制
+            cpu: "500m"      # 增加 CPU 限制
+          requests:
+            memory: "256Mi"  # 增加記憶體請求
+            cpu: "200m"      # 增加 CPU 請求
+        # 添加安全上下文
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL

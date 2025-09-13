@@ -1,0 +1,60 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: e2e-test
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      serviceAccountName: e2e-test-sa
+      restartPolicy: Never
+      containers:
+      - name: e2e-test
+        image: go-e2e-test:latest
+        imagePullPolicy: Never
+        command: ["./e2e-test"]
+        args: ["-test.v", "-test.timeout=300s"]
+        env:
+        - name: APP_URL
+          value: "http://go-e2e-app-service:8080"
+        - name: KUBERNETES_SERVICE_HOST
+          value: "kubernetes.default.svc.cluster.local"
+        - name: KUBERNETES_SERVICE_PORT
+          value: "443"
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+        # 添加網絡診斷
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - |
+                echo "=== Network Diagnostics ==="
+                echo "DNS Resolution:"
+                nslookup kubernetes.default.svc.cluster.local || true
+                echo "Connectivity Test:"
+                nc -zv kubernetes.default.svc.cluster.local 443 || true
+                echo "Service Account Info:"
+                ls -la /var/run/secrets/kubernetes.io/serviceaccount/ || true
+                echo "Environment Variables:"
+                env | grep KUBERNETES || true
+                echo "=========================="
+      initContainers:
+      - name: wait-for-app
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Waiting for application to be ready..."
+          until nc -z go-e2e-app-service 8080; do
+            echo "Waiting for go-e2e-app-service:8080..."
+            sleep 2
+          done
+          echo "Application is ready!"
